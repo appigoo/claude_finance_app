@@ -1,5 +1,5 @@
 import streamlit as st
-import anthropic
+from groq import Groq
 import json
 import time
 from datetime import datetime, timedelta
@@ -604,24 +604,33 @@ Target IRR: {target_irr}%"""
     }
 }
 
-# ─── Helper: Call Claude API ──────────────────────────────────────────────────
-def call_claude(prompt: str, system: str = "") -> str:
-    """Call Anthropic API with streaming."""
-    client = anthropic.Anthropic(api_key=st.session_state.get("api_key", ""))
-    
-    messages = [{"role": "user", "content": prompt}]
+# ─── Groq Models ─────────────────────────────────────────────────────────────
+GROQ_MODELS = {
+    "llama-3.3-70b-versatile": "⚡ Llama 3.3 70B (推薦)",
+    "llama-3.1-8b-instant":    "🚀 Llama 3.1 8B (最快)",
+    "mixtral-8x7b-32768":      "📄 Mixtral 8x7B (長文本)",
+    "gemma2-9b-it":            "💎 Gemma2 9B",
+}
+
+# ─── Helper: Call Groq API ────────────────────────────────────────────────────
+def call_groq(prompt: str, system: str = ""):
+    """Call Groq API with streaming."""
+    client = Groq(api_key=st.session_state.get("api_key", ""))
     sys_prompt = system or "You are an elite Wall Street analyst with 20+ years of experience at Goldman Sachs, Morgan Stanley, and Bridgewater. Provide institutional-grade financial analysis with specific numbers, actionable insights, and professional formatting. Use markdown with headers, tables, and bullet points."
-    
-    full_response = ""
-    with client.messages.stream(
-        model="claude-opus-4-5",
-        max_tokens=2000,
-        system=sys_prompt,
-        messages=messages
-    ) as stream:
-        for text in stream.text_stream:
-            full_response += text
-            yield text
+    model = st.session_state.get("groq_model", "llama-3.3-70b-versatile")
+    stream = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": sys_prompt},
+            {"role": "user",   "content": prompt},
+        ],
+        max_tokens=2048,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
 
 # ─── DCF Calculator ───────────────────────────────────────────────────────────
 def calculate_dcf(revenue, revenue_growth, ebitda_margin, tax_rate, capex_pct, 
@@ -663,6 +672,8 @@ def calculate_dcf(revenue, revenue_growth, ebitda_margin, tax_rate, capex_pct,
 # ─── Session State Init ───────────────────────────────────────────────────────
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
+if "groq_model" not in st.session_state:
+    st.session_state.groq_model = "llama-3.3-70b-versatile"
 if "active_module" not in st.session_state:
     st.session_state.active_module = "equity_research"
 if "ai_output" not in st.session_state:
@@ -677,7 +688,7 @@ with st.sidebar:
         <div style='font-family: Playfair Display, serif; font-size: 1.4rem; font-weight: 900; color: #F2EDE4;'>
             Claude <span style='color: #C94F0C;'>Finance</span>
         </div>
-        <div style='font-size: 0.75rem; color: #8C8378; margin-top: 0.25rem;'>Institutional AI Platform</div>
+        <div style='font-size: 0.75rem; color: #8C8378; margin-top: 0.25rem;'>Powered by Groq LPU™</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -689,14 +700,25 @@ with st.sidebar:
     
     # API Key
     api_key = st.text_input(
-        "🔑 Anthropic API Key",
+        "🔑 Groq API Key",
         type="password",
         value=st.session_state.api_key,
-        placeholder="sk-ant-..."
+        placeholder="gsk_..."
     )
     if api_key:
         st.session_state.api_key = api_key
         st.success("✓ API Key set" if lang == "EN" else "✓ API Key 已設定")
+
+    # Model Selector
+    st.markdown("<div style='font-size:0.75rem; color:#8C8378; text-transform:uppercase; letter-spacing:0.1em; margin:0.75rem 0 0.4rem;'>MODEL</div>", unsafe_allow_html=True)
+    model_choice = st.selectbox(
+        "",
+        options=list(GROQ_MODELS.keys()),
+        format_func=lambda x: GROQ_MODELS[x],
+        index=list(GROQ_MODELS.keys()).index(st.session_state.groq_model),
+        label_visibility="collapsed"
+    )
+    st.session_state.groq_model = model_choice
     
     st.divider()
     
@@ -923,7 +945,7 @@ else:
     
     if st.button(btn_label, use_container_width=True):
         if not st.session_state.api_key:
-            st.error("Please enter your Anthropic API Key in the sidebar." if lang == "EN" else "請在側欄輸入 Anthropic API Key。")
+            st.error("Please enter your Groq API Key in the sidebar." if lang == "EN" else "請在側欄輸入 Groq API Key。")
         else:
             final_prompt = custom_prompt if custom_prompt.strip() else filled
             
@@ -936,7 +958,7 @@ else:
             full_text = ""
             
             try:
-                for chunk in call_claude(final_prompt):
+                for chunk in call_groq(final_prompt):
                     full_text += chunk
                     output_placeholder.markdown(full_text)
                 
@@ -959,7 +981,7 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align:center; color:#8C8378; font-size:0.75rem; padding: 1rem 0;'>
-    Claude AI for Finance Professionals · Powered by Anthropic Claude · 
+    Claude AI for Finance Professionals · Powered by Groq LPU™ · 
     <span style='color:#C94F0C;'>Institutional Grade Analysis</span>
 </div>
 """, unsafe_allow_html=True)
